@@ -64,6 +64,9 @@ select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);b
 .del{width:100%;border:1px solid var(--bad);background:none;color:var(--bad);border-radius:8px;padding:6px;font:inherit;font-size:13px}
 #dlist details{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;color:var(--tx);font-size:16px}
 #dlist summary{font-weight:600}
+.id.warn{border-left-color:var(--acc)}
+.id .n{font-size:13px;color:var(--mut)}
+input[type=range]{padding:0;accent-color:var(--acc)}
 </style>
 </head>
 <body>
@@ -73,7 +76,7 @@ select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);b
 <main id="auth">
   <img class="logo" src="logo.png" alt="Lycée PK12">
   <h1><b>PK12</b>ID</h1>
-  <p class="sub">Platforme d'identification du lycée PK12</p>
+  <p class="sub">Identification des élèves du lycée</p>
   <label for="mail">Email</label><input id="mail" type="email" autocomplete="username" placeholder="prenom.nom@lycee.fr">
   <label for="pw">Mot de passe</label>
   <div class="pwrow"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye">Voir</button></div>
@@ -90,11 +93,12 @@ select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);b
     <div class="cam"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
     <button class="btn" id="snap">Capturer et identifier</button>
     <button class="btn alt" id="flip">Changer de caméra</button>
+    <div id="tune" style="display:none"><label>Strictesse (seuil de distance) : <b id="tv"></b> - plus bas = plus strict</label><input type="range" id="thr" min="0.30" max="0.60" step="0.01"></div>
     <div id="res"></div>
   </section>
 
   <section id="imp">
-    <p class="msg">Nommez chaque photo avec le nom de la personne, ex. <b>Dupont_Marie.jpg</b>. Importez un groupe à la fois (une classe, une discipline ou une fonction).</p>
+    <p class="msg">Nommez chaque photo avec le nom de la personne, ex. <b>Dupont_Marie.jpg</b>. Importez un groupe à la fois (une classe, une discipline ou une fonction). Pour plus de précision, ajoutez 2 à 3 photos par personne : <b>Dupont_Marie.jpg</b>, <b>Dupont_Marie_2.jpg</b>, <b>Dupont_Marie_3.jpg</b>.</p>
     <label for="kind">Type de personne</label>
     <select id="kind"><option value="eleve">Élève</option><option value="enseignant">Enseignant</option><option value="personnel">Personnel administratif</option></select>
     <label id="clsl" for="cls">Classe</label><input id="cls" placeholder="ex. 2nde A">
@@ -126,7 +130,8 @@ select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);b
 <script>
 const $=s=>document.querySelector(s);
 const MODELS='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
-const THRESHOLD=0.5, BUCKET='photos';
+let THRESHOLD=+localStorage.pk_thr||0.45;
+const BUCKET='photos', MARGIN=0.04;
 // --- Configuration Supabase (la clé "anon" est publique par conception) ---
 const SUPABASE_URL='https://ovdzznzyleainlidwjrd.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92ZHp6bnp5bGVhaW5saWR3anJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2Mzg2NTIsImV4cCI6MjEwNzIxNDY1Mn0.FbeM8Gm9_IldvMCp4fMBWBvrydieXe0GW2P7Nd7tUNg';
@@ -136,7 +141,7 @@ const KINDS={
   enseignant:{title:'Enseignant',lbl:'Discipline',ph:'ex. Mathématiques'},
   personnel:{title:'Personnel administratif',lbl:'Fonction',ph:'ex. Surveillant, Proviseur'}
 };
-let sb,matcher,students=[],facing='user',stream,started=false,locked=false,role='scanner';
+let sb,persons=[],students=[],facing='user',stream,started=false,locked=false,role='scanner';
 
 // ---------- Démarrage ----------
 (async()=>{
@@ -194,8 +199,13 @@ async function loadStudents(){
   rebuild();
 }
 function rebuild(){
-  matcher=students.length?new faceapi.FaceMatcher(students.map(s=>new faceapi.LabeledFaceDescriptors(s.id,[new Float32Array(s.descriptor)])),THRESHOLD):null;
-  $('#stat').textContent=students.length+' inscrits';
+  const m={};
+  students.forEach(s=>{
+    const k=(s.kind||'eleve')+'|'+s.class_name+'|'+s.full_name.toLowerCase();
+    (m[k]=m[k]||{rows:[],descs:[]}).rows.push(s);m[k].descs.push(new Float32Array(s.descriptor));
+  });
+  persons=Object.values(m);
+  $('#stat').textContent=Object.keys(m).length+' inscrits';
 }
 
 // ---------- Installation et partage ----------
@@ -227,8 +237,9 @@ async function loadRole(){
     const r=await sb.from('profiles').select('role').eq('user_id',user.id).maybeSingle();
     role=r.data&&r.data.role==='admin'?'admin':'scanner';
   }catch(e){role='scanner'}
+  $('#tune').style.display=role==='admin'?'block':'none';
   $('#share').style.display=role==='admin'?'':'none';
-  $('#role').textContent=(role==='admin'?'Admin':'Scanner')+' v9';
+  $('#role').textContent=(role==='admin'?'Admin':'Scanner')+' v10';
   document.querySelector('nav').style.display=role==='admin'?'flex':'none';
 }
 
@@ -275,27 +286,46 @@ async function startCam(){
 function stopCam(){stream&&stream.getTracks().forEach(t=>t.stop())}
 $('#flip').onclick=()=>{facing=facing==='user'?'environment':'user';startCam()};
 
+$('#thr').value=THRESHOLD;$('#tv').textContent=THRESHOLD.toFixed(2);
+$('#thr').oninput=()=>{THRESHOLD=+$('#thr').value;localStorage.pk_thr=THRESHOLD;$('#tv').textContent=THRESHOLD.toFixed(2)};
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+function grab(v){const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);return c}
 $('#snap').onclick=async()=>{
-  const v=$('#vid'),res=$('#res');
+  const v=$('#vid'),res=$('#res'),btn=$('#snap'),ov=$('#ov'),g=ov.getContext('2d');
   try{
-  if(!v.videoWidth){res.innerHTML='<p class="msg">La caméra n\'est pas prête. Autorisez-la, puis réessayez.</p>';startCam();return}
-  if(!matcher){res.innerHTML='<p class="msg">Aucun élève en base. Importez d\'abord une classe.</p>';return}
-  res.innerHTML='<p class="msg">Analyse…</p>';
-  const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
-  const found=await faceapi.detectAllFaces(c).withFaceLandmarks().withFaceDescriptors();
-  const ov=$('#ov');ov.width=c.width;ov.height=c.height;const g=ov.getContext('2d');g.clearRect(0,0,ov.width,ov.height);
-  if(!found.length){res.innerHTML='<p class="msg">Aucun visage détecté. Rapprochez-vous et éclairez le visage.</p>';return}
-  res.innerHTML='';
-  for(const f of found){
-    const m=matcher.findBestMatch(f.descriptor),ok=m.label!=='unknown',b=f.detection.box;
-    g.strokeStyle=ok?'#3ddc97':'#ff6b6b';g.lineWidth=4;g.strokeRect(b.x,b.y,b.width,b.height);
-    if(!ok){res.insertAdjacentHTML('beforeend','<div class="id no"><div><h2>Non reconnu</h2><p>Aucune correspondance dans la base.</p></div></div>');continue}
-    const s=students.find(x=>x.id===m.label),pct=Math.round((1-m.distance)*100);
+    if(!v.videoWidth){res.innerHTML='<p class="msg">La caméra n\'est pas prête. Autorisez-la, puis réessayez.</p>';startCam();return}
+    if(!persons.length){res.innerHTML='<p class="msg">Aucune personne en base. Importez d\'abord un groupe.</p>';return}
+    btn.disabled=true;res.innerHTML='<p class="msg">Analyse en cours, ne bougez pas…</p>';
+    const opt=new faceapi.SsdMobilenetv1Options({minConfidence:0.7});
+    const descs=[];let box=null;
+    for(let i=0;i<3;i++){
+      const all=await faceapi.detectAllFaces(grab(v),opt).withFaceLandmarks().withFaceDescriptors();
+      if(all.length){
+        const f=all.sort((a,b)=>b.detection.box.area-a.detection.box.area)[0];
+        if(f.detection.box.width>=90){descs.push(f.descriptor);if(!box)box=f.detection.box}
+      }
+      if(i<2)await wait(150);
+    }
+    ov.width=v.videoWidth;ov.height=v.videoHeight;g.clearRect(0,0,ov.width,ov.height);
+    if(descs.length<2){res.innerHTML='<p class="msg">Visage non détecté de façon stable. Rapprochez-vous, regardez la caméra de face, avec de la lumière.</p>';return}
+    const avg=new Float32Array(128);
+    descs.forEach(d=>{for(let j=0;j<128;j++)avg[j]+=d[j]/descs.length});
+    const ranked=persons.map(p=>({p,d:p.descs.reduce((a,x)=>a+faceapi.euclideanDistance(avg,x),0)/p.descs.length})).sort((a,b)=>a.d-b.d);
+    const best=ranked[0],second=ranked[1];
+    const ok=best.d<=THRESHOLD;
+    const amb=ok&&second&&(second.d-best.d)<MARGIN;
+    const sure=ok&&!amb&&best.d<=THRESHOLD-0.07;
+    g.strokeStyle=!ok?'#ff6b6b':sure?'#3ddc97':'#ffc83d';g.lineWidth=4;g.strokeRect(box.x,box.y,box.width,box.height);
+    if(!ok){
+      res.innerHTML='<div class="id no"><div><h2>Non reconnu</h2><p>Aucune correspondance fiable dans la base.</p><p class="n">distance la plus proche : '+best.d.toFixed(2)+'</p></div></div>';
+      return;
+    }
+    const s=best.p.rows[0],k=KINDS[s.kind||'eleve'];
     const {data}=await sb.storage.from(BUCKET).createSignedUrl(s.photo_path,300);
-    res.insertAdjacentHTML('beforeend',`<div class="id"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>${KINDS[s.kind||'eleve'].title} - ${KINDS[s.kind||'eleve'].lbl} : ${esc(s.class_name)}</p><span class="c">${pct}%</span></div></div>`);
-  }
-  setTimeout(()=>g.clearRect(0,0,ov.width,ov.height),2500);
+    const note=amb?'<p class="n">Ressemble aussi à '+esc(second.p.rows[0].full_name)+'</p>':'';
+    res.innerHTML=`<div class="id ${sure?'':'warn'}"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>${k.title} - ${k.lbl} : ${esc(s.class_name)}</p><span class="c">${sure?'Confiance élevée':'À vérifier visuellement'}</span>${note}<p class="n">distance : ${best.d.toFixed(2)}</p></div></div>`;
   }catch(e){res.innerHTML='<p class="msg">Erreur : '+esc(e.message||String(e))+'</p>'}
+  finally{btn.disabled=false;setTimeout(()=>g.clearRect(0,0,ov.width,ov.height),2500)}
 };
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -343,7 +373,7 @@ $('#dlist').addEventListener('click',async e=>{
 
 // ---------- Import par groupe ----------
 const log=(t,c)=>{const d=document.createElement('div');d.textContent=t;d.className=c||'';$('#log').prepend(d)};
-const nameFrom=f=>f.name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
+const nameFrom=f=>f.name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim().replace(/\s\d+$/,'');
 $('#go').onclick=async()=>{
   if(role!=='admin')return;
   const kind=$('#kind').value,cls=$('#cls').value.trim(),files=[...$('#files').files];
@@ -354,8 +384,10 @@ $('#go').onclick=async()=>{
     const name=nameFrom(f);
     try{
       const img=await faceapi.bufferToImage(f);
-      const d=await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-      if(!d){log(name+' : aucun visage détecté','er');continue}
+      const all=await faceapi.detectAllFaces(img,new faceapi.SsdMobilenetv1Options({minConfidence:0.8})).withFaceLandmarks().withFaceDescriptors();
+      if(all.length!==1){log(name+' : '+(all.length?all.length+' visages sur la photo (un seul attendu)':'aucun visage détecté'),'er');continue}
+      const d=all[0];
+      if(d.detection.box.width<110){log(name+' : visage trop petit, utilisez une photo plus rapprochée','er');continue}
       const path=`${kind}/${safeCls}/${name.replace(/[^\w\-]+/g,'_')}_${Date.now()}.jpg`;
       const up=await sb.storage.from(BUCKET).upload(path,f,{contentType:f.type||'image/jpeg'});
       if(up.error)throw up.error;
