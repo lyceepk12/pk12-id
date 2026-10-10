@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1b2d">
 <link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>PK12 ID</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
@@ -39,20 +39,41 @@ input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);ba
 #log div{padding:3px 0}#log .ok{color:var(--ok)}#log .er{color:var(--bad)}
 .msg{color:var(--mut);margin:10px 0}
 .small{font-size:13px;color:var(--mut)}
+
+#top{display:none}
+.out{background:none;border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;margin-left:8px}
+#auth{min-height:100vh;display:none;flex-direction:column;justify-content:center;padding-bottom:40px}
+#auth .logo,.lk .logo{width:150px;height:150px;margin:0 auto 14px;display:block;border-radius:50%;background:#fff;box-shadow:0 10px 30px #0008}
+#auth h1{text-align:center;font-size:34px}
+#auth .sub{text-align:center;color:var(--mut);margin:4px 0 22px}
+.pwrow{position:relative}.pwrow button{position:absolute;right:6px;top:6px;bottom:6px;border:0;background:none;color:var(--acc);font:inherit;font-weight:600;padding:0 10px}
+details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
+#aerr{color:var(--bad);text-align:center;min-height:20px}
+
+.hl{width:34px;height:34px;border-radius:50%;vertical-align:middle;margin-right:8px;background:#fff}
+.tag{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1px 8px;font-size:12px;margin-right:6px;color:var(--acc)}
+#lock{display:none;position:fixed;inset:0;z-index:50;background:var(--bg);align-items:center;justify-content:center;padding:24px}
+.lk{width:100%;max-width:420px;text-align:center}.lk h2{margin:6px 0}
+#lerr{color:var(--bad);min-height:20px}
 </style>
 </head>
 <body>
-<header><h1><b>PK12</b>ID</h1><span class="small" id="stat">Chargement…</span></header>
+<header id="top"><h1><img class="hl" src="logo.png" alt=""><b>PK12</b>ID</h1><span><span class="tag" id="role"></span><span class="small" id="stat">Chargement…</span><button class="out" id="logout">Quitter</button></span></header>
 
 <!-- Connexion -->
-<main id="auth" style="display:none">
-  <p class="msg">Connectez-vous avec le compte enseignant créé dans Supabase.</p>
-  <label>URL Supabase</label><input id="url" placeholder="https://xxxx.supabase.co">
-  <label>Clé anon (publique)</label><input id="key">
-  <label>Email</label><input id="mail" type="email" autocomplete="username">
-  <label>Mot de passe</label><input id="pw" type="password" autocomplete="current-password">
+<main id="auth">
+  <img class="logo" src="logo.png" alt="Lycée PK12">
+  <h1><b>PK12</b>ID</h1>
+  <p class="sub">Identification des élèves du lycée</p>
+  <label for="mail">Email</label><input id="mail" type="email" autocomplete="username" placeholder="prenom.nom@lycee.fr">
+  <label for="pw">Mot de passe</label>
+  <div class="pwrow"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye">Voir</button></div>
   <button class="btn" id="login">Se connecter</button>
-  <p class="msg" id="aerr"></p>
+  <p id="aerr"></p>
+  <details id="cfg"><summary>Configuration Supabase</summary>
+    <label for="url">URL du projet</label><input id="url" placeholder="https://xxxx.supabase.co">
+    <label for="key">Clé anon (publique)</label><input id="key">
+  </details>
 </main>
 
 <!-- App -->
@@ -76,13 +97,23 @@ input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);ba
 </main>
 </div>
 
+<div id="lock"><div class="lk">
+  <img class="logo" src="logo.png" alt="">
+  <h2>Session verrouillée</h2>
+  <p class="msg">Inactivité détectée. Entrez votre mot de passe pour continuer.</p>
+  <input id="lpw" type="password" autocomplete="current-password" placeholder="Mot de passe">
+  <button class="btn" id="unlock">Déverrouiller</button>
+  <p id="lerr"></p>
+  <button class="btn alt" id="lswitch">Changer de compte</button>
+</div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/dist/face-api.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const MODELS='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 const THRESHOLD=0.5, BUCKET='photos';
-let sb,matcher,students=[],facing='user',stream;
+const LOCK_MIN=5, LOCK_MS=LOCK_MIN*60000; // durée d'inactivité avant verrouillage
+let sb,matcher,students=[],facing='user',stream,started=false,locked=false,role='scanner';
 
 // ---------- Démarrage ----------
 (async()=>{
@@ -91,19 +122,40 @@ let sb,matcher,students=[],facing='user',stream;
   if(!u||!k){showAuth();return}
   sb=supabase.createClient(u,k);
   const {data}=await sb.auth.getSession();
-  data.session?startApp():showAuth();
+  if(!data.session)showAuth();
+  else if(Date.now()-(+localStorage.pk_last||0)>LOCK_MS)lock();
+  else startApp();
 })();
-function showAuth(){$('#auth').style.display='block';$('#stat').textContent='Hors session';
-  $('#url').value=localStorage.pk_url||'';$('#key').value=localStorage.pk_key||''}
+function showAuth(){
+  $('#auth').style.display='flex';$('#top').style.display='none';
+  $('#url').value=localStorage.pk_url||'';$('#key').value=localStorage.pk_key||'';
+  $('#mail').value=localStorage.pk_mail||'';
+  if(!localStorage.pk_url||!localStorage.pk_key)$('#cfg').open=true;
+}
+$('#eye').onclick=()=>{const p=$('#pw'),h=p.type==='password';p.type=h?'text':'password';$('#eye').textContent=h?'Masquer':'Voir'};
+$('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login').click()});
 $('#login').onclick=async()=>{
-  localStorage.pk_url=$('#url').value.trim();localStorage.pk_key=$('#key').value.trim();
-  sb=supabase.createClient(localStorage.pk_url,localStorage.pk_key);
-  const {error}=await sb.auth.signInWithPassword({email:$('#mail').value,password:$('#pw').value});
-  if(error){$('#aerr').textContent='Connexion impossible : '+error.message;return}
-  $('#auth').style.display='none';startApp();
+  const u=$('#url').value.trim(),k=$('#key').value.trim(),err=$('#aerr'),btn=$('#login');
+  err.textContent='';
+  if(!u||!k){$('#cfg').open=true;err.textContent='Renseignez l\'URL et la clé Supabase.';return}
+  if(!$('#mail').value||!$('#pw').value){err.textContent='Entrez votre email et votre mot de passe.';return}
+  btn.disabled=true;btn.textContent='Connexion…';
+  try{
+    sb=supabase.createClient(u,k);
+    const {error}=await sb.auth.signInWithPassword({email:$('#mail').value.trim(),password:$('#pw').value});
+    if(error)throw error;
+    localStorage.pk_url=u;localStorage.pk_key=k;localStorage.pk_mail=$('#mail').value.trim();
+    $('#pw').value='';$('#auth').style.display='none';touch();startApp();
+  }catch(e){
+    err.textContent=/invalid login/i.test(e.message)?'Email ou mot de passe incorrect.':'Connexion impossible : '+(e.message||e);
+  }
+  btn.disabled=false;btn.textContent='Se connecter';
 };
+$('#logout').onclick=async()=>{stopCam();await sb.auth.signOut();location.reload()};
 async function startApp(){
-  $('#app').style.display='block';$('#stat').textContent='Chargement des modèles…';
+  started=true;touch();
+  await loadRole();
+  $('#app').style.display='block';$('#top').style.display='flex';$('#stat').textContent='Chargement des modèles…';
   $('#snap').disabled=true;$('#snap').textContent='Chargement des modèles…';
   startCam();
   try{
@@ -124,6 +176,42 @@ async function loadStudents(){
   matcher=students.length?new faceapi.FaceMatcher(students.map(s=>new faceapi.LabeledFaceDescriptors(s.id,[new Float32Array(s.descriptor)])),THRESHOLD):null;
   $('#stat').textContent=students.length+' élèves';
 }
+
+// ---------- Rôle ----------
+async function loadRole(){
+  try{
+    const {data:{user}}=await sb.auth.getUser();
+    const r=await sb.from('profiles').select('role').eq('user_id',user.id).maybeSingle();
+    role=r.data&&r.data.role==='admin'?'admin':'scanner';
+  }catch(e){role='scanner'}
+  $('#role').textContent=role==='admin'?'Admin':'Scanner';
+  document.querySelector('nav').style.display=role==='admin'?'flex':'none';
+}
+
+// ---------- Verrouillage automatique ----------
+function touch(){if(!locked)localStorage.pk_last=Date.now()}
+['pointerdown','keydown','touchstart'].forEach(e=>addEventListener(e,touch,{passive:true}));
+const stale=()=>Date.now()-(+localStorage.pk_last||0)>LOCK_MS;
+setInterval(()=>{if(started&&!locked&&stale())lock()},5000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&started&&!locked&&stale())lock()});
+function lock(){
+  locked=true;stopCam();$('#res').innerHTML='';$('#lpw').value='';$('#lerr').textContent='';
+  $('#lock').style.display='flex';
+}
+$('#lpw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#unlock').click()});
+$('#unlock').onclick=async()=>{
+  const btn=$('#unlock');btn.disabled=true;$('#lerr').textContent='';
+  try{
+    const {data}=await sb.auth.getSession();
+    const email=(data.session&&data.session.user.email)||localStorage.pk_mail;
+    const {error}=await sb.auth.signInWithPassword({email,password:$('#lpw').value});
+    if(error)throw error;
+    locked=false;touch();$('#lock').style.display='none';
+    if(!started)startApp();else if($('#scan').classList.contains('on'))startCam();
+  }catch(e){$('#lerr').textContent='Mot de passe incorrect.'}
+  btn.disabled=false;
+};
+$('#lswitch').onclick=async()=>{await sb.auth.signOut();location.reload()};
 
 // ---------- Onglets ----------
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -170,6 +258,7 @@ const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',
 const log=(t,c)=>{const d=document.createElement('div');d.textContent=t;d.className=c||'';$('#log').prepend(d)};
 const nameFrom=f=>f.name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
 $('#go').onclick=async()=>{
+  if(role!=='admin')return;
   const cls=$('#cls').value.trim(),files=[...$('#files').files];
   if(!cls||!files.length){log('Indiquez la classe et choisissez des photos.','er');return}
   $('#go').disabled=true;$('#log').innerHTML='';let n=0;
