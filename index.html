@@ -104,8 +104,16 @@ $('#login').onclick=async()=>{
 };
 async function startApp(){
   $('#app').style.display='block';$('#stat').textContent='Chargement des modèles…';
-  await Promise.all([faceapi.nets.ssdMobilenetv1.loadFromUri(MODELS),faceapi.nets.faceLandmark68Net.loadFromUri(MODELS),faceapi.nets.faceRecognitionNet.loadFromUri(MODELS)]);
-  await loadStudents();startCam();
+  $('#snap').disabled=true;$('#snap').textContent='Chargement des modèles…';
+  startCam();
+  try{
+    await Promise.all([faceapi.nets.ssdMobilenetv1.loadFromUri(MODELS),faceapi.nets.faceLandmark68Net.loadFromUri(MODELS),faceapi.nets.faceRecognitionNet.loadFromUri(MODELS)]);
+    await loadStudents();
+    $('#snap').disabled=false;$('#snap').textContent='Capturer et identifier';
+  }catch(e){
+    $('#stat').textContent='Erreur';
+    $('#res').innerHTML='<p class="msg">Impossible de charger la reconnaissance faciale : '+esc(e.message||String(e))+'. Vérifiez votre connexion internet puis rechargez la page.</p>';
+  }
 }
 async function loadStudents(){
   students=[];
@@ -136,6 +144,8 @@ $('#flip').onclick=()=>{facing=facing==='user'?'environment':'user';startCam()};
 
 $('#snap').onclick=async()=>{
   const v=$('#vid'),res=$('#res');
+  try{
+  if(!v.videoWidth){res.innerHTML='<p class="msg">La caméra n\'est pas prête. Autorisez-la, puis réessayez.</p>';startCam();return}
   if(!matcher){res.innerHTML='<p class="msg">Aucun élève en base. Importez d\'abord une classe.</p>';return}
   res.innerHTML='<p class="msg">Analyse…</p>';
   const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
@@ -152,6 +162,7 @@ $('#snap').onclick=async()=>{
     res.insertAdjacentHTML('beforeend',`<div class="id"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>Classe : ${esc(s.class_name)}</p><span class="c">${pct}%</span></div></div>`);
   }
   setTimeout(()=>g.clearRect(0,0,ov.width,ov.height),2500);
+  }catch(e){res.innerHTML='<p class="msg">Erreur : '+esc(e.message||String(e))+'</p>'}
 };
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
