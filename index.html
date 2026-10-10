@@ -79,6 +79,14 @@ input[type=range]{padding:0;min-height:30px;accent-color:var(--blue)}
 .hero img,.hl,#auth .logo,.lk .logo{background:#fff}
 #top h1 b{background:#fff;color:#123c78}#auth h1 b{background:var(--blue)}
 input::placeholder{color:var(--mut);opacity:.7}
+.ovl{align-items:flex-start}.ovl .box{margin:auto}
+input[type=checkbox]{width:auto;min-height:0}.ck{display:flex;align-items:center;gap:8px;margin:0;color:var(--tx)}
+.box h3{margin:16px 0 4px;font-size:17px}
+.frm{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}.frm .w{grid-column:1/-1}
+.rec{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.rm{border:0;background:none;color:var(--bad);font-size:24px;line-height:1}
+.pc .row{flex-wrap:wrap}.inf{flex:1 1 100%;border:1px solid var(--ok);color:var(--ok);background:var(--card);border-radius:8px;padding:8px 4px;font-size:13px}
+.id .bd{color:var(--bad);font-weight:600}
 </style>
 </head>
 <body>
@@ -143,6 +151,22 @@ input::placeholder{color:var(--mut);opacity:.7}
 </main>
 </div>
 
+<div class="ovl" id="fiche"><div class="box" style="max-width:500px">
+  <h2 id="fnm"></h2><p class="small" id="fgr"></p>
+  <label for="fmat">Matricule</label>
+  <div style="display:flex;gap:8px"><input id="fmat"><button class="btn sm" id="fmsave" style="margin:0">Enregistrer</button></div>
+  <div id="fel">
+    <h3>Absences et retards</h3><div id="flabs"></div>
+    <div class="frm"><input type="date" id="fad"><select id="fat"><option value="absence">Absence</option><option value="retard">Retard</option></select>
+      <label class="ck"><input type="checkbox" id="faj"> Justifiée</label><button class="btn sm" id="faadd" style="margin:0">Ajouter</button>
+      <input id="fan2" class="w" placeholder="Motif (facultatif)"></div>
+    <h3>Sanctions</h3><div id="flsan"></div>
+    <div class="frm"><input type="date" id="fsd"><select id="fst"><option>Avertissement</option><option>Blâme</option><option>Retenue</option><option>Exclusion temporaire</option><option>Exclusion définitive</option><option>Autre</option></select>
+      <input id="fsm" class="w" placeholder="Motif"><button class="btn sm w" id="fsadd" style="margin:0">Ajouter la sanction</button></div>
+  </div>
+  <p id="ferr" style="color:var(--bad)"></p>
+  <button class="btn alt" id="fclose">Fermer</button>
+</div></div>
 <div class="ovl" id="edit"><div class="box">
   <h2>Modifier</h2>
   <label for="enm">Nom</label><input id="enm">
@@ -227,16 +251,17 @@ async function startApp(){
 async function loadStudents(){
   students=[];
   for(let from=0;;from+=1000){
-    const {data,error}=await sb.from('students').select('id,full_name,class_name,kind,photo_path,descriptor').range(from,from+999);
+    const {data,error}=await sb.from('students').select('id,full_name,class_name,kind,matricule,person_id,photo_path,descriptor').range(from,from+999);
     if(error||!data.length)break;students.push(...data);if(data.length<1000)break;
   }
   rebuild();
 }
+const pidOf=s=>s.person_id||s.id;
 function rebuild(){
   const m={};
   students.forEach(s=>{
-    const k=(s.kind||'eleve')+'|'+s.class_name+'|'+s.full_name.toLowerCase();
-    (m[k]=m[k]||{rows:[],descs:[]}).rows.push(s);m[k].descs.push(new Float32Array(s.descriptor));
+    const k=pidOf(s);
+    (m[k]=m[k]||{rows:[],descs:[],pid:k}).rows.push(s);m[k].descs.push(new Float32Array(s.descriptor));
   });
   persons=Object.values(m);
   $('#stat').textContent=Object.keys(m).length+' inscrits';
@@ -282,7 +307,7 @@ async function loadRole(){
   $('#hsub').textContent=role==='admin'?'Compte administrateur':'Compte scanner (scan uniquement)';
   $('#tune').style.display=role==='admin'?'block':'none';
   $('#share').style.display=role==='admin'?'':'none';
-  $('#role').textContent=(role==='admin'?'Admin':'Scanner')+' v12';
+  $('#role').textContent=(role==='admin'?'Admin':'Scanner')+' v13';
   document.querySelector('nav').style.display=role==='admin'?'flex':'none';
 }
 
@@ -357,6 +382,7 @@ async function identify(){
   const amb=ok&&second&&(second.d-best.d)<MARGIN,sure=ok&&!amb&&best.d<=THRESHOLD-0.07;
   return {st:!ok?'no':sure?'sure':'check',box,best,second,amb};
 }
+const fr=d=>String(d).split('-').reverse().join('/');
 async function show(r){
   const v=$('#vid'),res=$('#res'),ov=$('#ov'),g=ov.getContext('2d');
   ov.width=v.videoWidth;ov.height=v.videoHeight;g.clearRect(0,0,ov.width,ov.height);
@@ -364,10 +390,21 @@ async function show(r){
   g.strokeStyle={no:'#d63a2a',sure:'#2e9e4a',check:'#e69a14'}[r.st];g.lineWidth=4;g.strokeRect(r.box.x,r.box.y,r.box.width,r.box.height);
   setTimeout(()=>g.clearRect(0,0,ov.width,ov.height),2500);
   if(r.st==='no'){res.innerHTML='<div class="id no"><div><h2>Non reconnu</h2><p>Aucune correspondance fiable dans la base.</p><p class="n">distance la plus proche : '+r.best.d.toFixed(2)+'</p></div></div>';return}
-  const s=r.best.p.rows[0],k=KINDS[s.kind||'eleve'],sure=r.st==='sure';
-  const {data}=await sb.storage.from(BUCKET).createSignedUrl(s.photo_path,300);
+  const s=r.best.p.rows[0],k=KINDS[s.kind||'eleve'],sure=r.st==='sure',pid=r.best.p.pid;
+  const mat=(r.best.p.rows.find(x=>x.matricule)||{}).matricule;
+  let extra='<p>Matricule : '+(mat?esc(mat):'non renseigné')+'</p>';
+  const pic=sb.storage.from(BUCKET).createSignedUrl(s.photo_path,300);
+  if((s.kind||'eleve')==='eleve'){
+    const [ab,sa]=await Promise.all([sb.from('absences').select('kind,justified').eq('person_id',pid),sb.from('sanctions').select('sanc_date,type').eq('person_id',pid).order('sanc_date',{ascending:false})]);
+    if(!ab.error&&!sa.error){
+      const A=ab.data.filter(x=>x.kind==='absence'),R=ab.data.length-A.length,nj=A.filter(x=>!x.justified).length;
+      extra+=`<p>Absences : ${A.length} (${nj} non justifiée${nj>1?'s':''}) - Retards : ${R}</p>`;
+      extra+=sa.data.length?`<p class="bd">Sanctions : ${sa.data.length} - dernière : ${esc(sa.data[0].type)} (${fr(sa.data[0].sanc_date)})</p>`:'<p>Aucune sanction</p>';
+    }
+  }
+  const {data}=await pic;
   const note=r.amb?'<p class="n">Ressemble aussi à '+esc(r.second.p.rows[0].full_name)+'</p>':'';
-  res.innerHTML=`<div class="id ${sure?'':'warn'}"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>${k.title} - ${k.lbl} : ${esc(s.class_name)}</p><span class="c">${sure?'Confiance élevée':'À vérifier visuellement'}</span>${note}<p class="n">distance : ${r.best.d.toFixed(2)}</p></div></div>`;
+  res.innerHTML=`<div class="id ${sure?'':'warn'}"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>${k.title} - ${k.lbl} : ${esc(s.class_name)}</p>${extra}<span class="c">${sure?'Confiance élevée':'À vérifier visuellement'}</span>${note}<p class="n">distance : ${r.best.d.toFixed(2)}</p></div></div>`;
 }
 $('#snap').onclick=async()=>{
   const v=$('#vid'),res=$('#res'),btn=$('#snap');
@@ -412,13 +449,57 @@ $('#esave').onclick=async()=>{
   const s=editing,nm=$('#enm').value.trim(),kd=$('#eknd').value,gr=$('#egr').value.trim();
   if(!nm||!gr){$('#eerr').textContent='Le nom et le groupe sont obligatoires.';return}
   $('#esave').disabled=true;
-  const r=await sb.from('students').update({full_name:nm,kind:kd,class_name:gr}).eq('kind',s.kind||'eleve').eq('class_name',s.class_name).eq('full_name',s.full_name).select('id');
+  const q=sb.from('students').update({full_name:nm,kind:kd,class_name:gr});
+  const r=await (s.person_id?q.eq('person_id',s.person_id):q.eq('id',s.id)).select('id');
   $('#esave').disabled=false;
   if(r.error||!r.data||!r.data.length){$('#eerr').textContent='Modification refusée : '+(r.error?r.error.message:'compte admin requis.');return}
   const ids=new Set(r.data.map(x=>x.id));
   students.forEach(x=>{if(ids.has(x.id)){x.full_name=nm;x.kind=kd;x.class_name=gr}});
   $('#edit').style.display='none';rebuild();renderDir();
 };
+// ---------- Fiche : matricule, absences, sanctions (admin) ----------
+let fp=null;
+const today=()=>new Date().toISOString().slice(0,10);
+function openFiche(x){
+  fp=x;const k=KINDS[x.kind||'eleve'];
+  $('#fnm').textContent=x.full_name;$('#fgr').textContent=k.title+' - '+k.lbl+' : '+x.class_name;
+  $('#fmat').value=x.matricule||'';$('#fad').value=$('#fsd').value=today();$('#ferr').textContent='';
+  $('#fel').style.display=(x.kind||'eleve')==='eleve'?'':'none';
+  $('#fiche').style.display='flex';loadFiche();
+}
+const rec=(t,x,txt)=>`<div class="rec"><span>${txt}</span><button class="rm" data-t="${t}" data-id="${x.id}" aria-label="Supprimer">&times;</button></div>`;
+async function loadFiche(){
+  if((fp.kind||'eleve')!=='eleve')return;
+  const pid=pidOf(fp);
+  const [a,b]=await Promise.all([sb.from('absences').select('*').eq('person_id',pid).order('abs_date',{ascending:false}),sb.from('sanctions').select('*').eq('person_id',pid).order('sanc_date',{ascending:false})]);
+  if(a.error||b.error){$('#ferr').textContent='Erreur : '+(a.error||b.error).message+' (exécutez fiche.sql dans Supabase)';return}
+  $('#flabs').innerHTML=a.data.map(x=>rec('absences',x,`${fr(x.abs_date)} - ${x.kind==='retard'?'Retard':'Absence'} - ${x.justified?'justifiée':'non justifiée'}${x.note?' - '+esc(x.note):''}`)).join('')||'<p class="small">Aucune absence enregistrée.</p>';
+  $('#flsan').innerHTML=b.data.map(x=>rec('sanctions',x,`${fr(x.sanc_date)} - ${esc(x.type)}${x.motif?' - '+esc(x.motif):''}`)).join('')||'<p class="small">Aucune sanction enregistrée.</p>';
+}
+async function addRec(table,row){
+  if(!row[table==='absences'?'abs_date':'sanc_date']){$('#ferr').textContent='Choisissez une date.';return false}
+  const r=await sb.from(table).insert({person_id:pidOf(fp),...row});
+  if(r.error){$('#ferr').textContent='Ajout refusé : '+r.error.message;return false}
+  $('#ferr').textContent='';loadFiche();return true;
+}
+$('#faadd').onclick=async()=>{if(await addRec('absences',{abs_date:$('#fad').value,kind:$('#fat').value,justified:$('#faj').checked,note:$('#fan2').value.trim()||null})){$('#fan2').value='';$('#faj').checked=false}};
+$('#fsadd').onclick=async()=>{if(await addRec('sanctions',{sanc_date:$('#fsd').value,type:$('#fst').value,motif:$('#fsm').value.trim()||null}))$('#fsm').value=''};
+$('#fiche').addEventListener('click',async e=>{
+  const b=e.target.closest('.rm');if(!b)return;
+  if(!confirm('Supprimer cette ligne ?'))return;
+  const r=await sb.from(b.dataset.t).delete().eq('id',b.dataset.id).select('id');
+  if(r.error||!r.data.length){$('#ferr').textContent='Suppression refusée.';return}
+  loadFiche();
+});
+$('#fmsave').onclick=async()=>{
+  const v=$('#fmat').value.trim()||null,q=sb.from('students').update({matricule:v});
+  const r=await (fp.person_id?q.eq('person_id',fp.person_id):q.eq('id',fp.id)).select('id');
+  if(r.error||!r.data.length){$('#ferr').textContent='Enregistrement refusé : '+(r.error?r.error.message:'compte admin requis.');return}
+  const ids=new Set(r.data.map(x=>x.id));students.forEach(x=>{if(ids.has(x.id))x.matricule=v});
+  rebuild();renderDir();$('#ferr').textContent='';$('#fmsave').textContent='Enregistré';setTimeout(()=>{$('#fmsave').textContent='Enregistrer'},1500);
+};
+$('#fclose').onclick=()=>{$('#fiche').style.display='none'};
+
 // ---------- Comptes (admin) ----------
 async function renderAccounts(){
   const box=$('#alist');box.innerHTML='<p class="msg">Chargement…</p>';
@@ -440,7 +521,7 @@ function renderDir(){
   const q=$('#dsearch').value.trim().toLowerCase(),k=$('#dkind').value;
   const open=new Set([...document.querySelectorAll('#dlist details[open]')].map(d=>d.dataset.key));
   dgroups={};
-  students.filter(s=>(k==='all'||(s.kind||'eleve')===k)&&(!q||s.full_name.toLowerCase().includes(q)))
+  students.filter(s=>(k==='all'||(s.kind||'eleve')===k)&&(!q||(s.full_name+' '+(s.matricule||'')).toLowerCase().includes(q)))
     .forEach(s=>{const key=(s.kind||'eleve')+'|'+s.class_name;(dgroups[key]=dgroups[key]||[]).push(s)});
   const keys=Object.keys(dgroups).sort((a,b)=>a.localeCompare(b,'fr',{numeric:true}));
   $('#dlist').innerHTML=keys.length?keys.map(key=>{
@@ -455,12 +536,13 @@ async function fillGroup(d){
   const arr=(dgroups[d.dataset.key]||[]).slice().sort((a,b)=>a.full_name.localeCompare(b.full_name,'fr'));
   const {data}=await sb.storage.from(BUCKET).createSignedUrls(arr.map(s=>s.photo_path),3600);
   const url={};(data||[]).forEach(x=>{url[x.path]=x.signedUrl});
-  grid.innerHTML=arr.map(s=>`<figure class="pc"><img loading="lazy" src="${url[s.photo_path]||''}" alt=""><figcaption>${esc(s.full_name)}</figcaption><div class="row"><button class="edt" data-id="${s.id}">Modifier</button><button class="del" data-id="${s.id}">Supprimer</button></div></figure>`).join('');
+  grid.innerHTML=arr.map(s=>`<figure class="pc"><img loading="lazy" src="${url[s.photo_path]||''}" alt=""><figcaption>${esc(s.full_name)}${s.matricule?'<br><span class="small">Mat. '+esc(s.matricule)+'</span>':''}</figcaption><div class="row"><button class="inf" data-id="${s.id}">Fiche : matricule, absences, sanctions</button><button class="edt" data-id="${s.id}">Modifier</button><button class="del" data-id="${s.id}">Supprimer</button></div></figure>`).join('');
 }
 $('#dlist').addEventListener('toggle',e=>{if(e.target.open)fillGroup(e.target)},true);
 $('#dkind').onchange=renderDir;$('#dsearch').oninput=renderDir;
 $('#dlist').addEventListener('click',async e=>{
   if(role!=='admin')return;
+  const inf=e.target.closest('.inf');if(inf){const x=students.find(y=>y.id===inf.dataset.id);if(x)openFiche(x);return}
   const ed=e.target.closest('.edt');if(ed){const x=students.find(y=>y.id===ed.dataset.id);if(x)openEdit(x);return}
   const gr=e.target.closest('.gren');
   if(gr){
@@ -482,7 +564,9 @@ $('#dlist').addEventListener('click',async e=>{
     b.disabled=false;b.textContent='Supprimer';return;
   }
   await sb.storage.from(BUCKET).remove([s.photo_path]);
-  students=students.filter(x=>x.id!==s.id);rebuild();renderDir();
+  students=students.filter(x=>x.id!==s.id);
+  if(!students.some(x=>pidOf(x)===pidOf(s))){await sb.from('absences').delete().eq('person_id',pidOf(s));await sb.from('sanctions').delete().eq('person_id',pidOf(s))}
+  rebuild();renderDir();
 });
 
 // ---------- Import par groupe ----------
@@ -494,6 +578,7 @@ $('#go').onclick=async()=>{
   const kind=$('#kind').value,cls=$('#cls').value.trim(),files=[...$('#files').files];
   if(!cls||!files.length){log('Renseignez le champ « '+KINDS[kind].lbl+' » et choisissez des photos.','er');return}
   $('#go').disabled=true;$('#log').innerHTML='';let n=0;
+  const pm={};students.forEach(x=>{pm[(x.kind||'eleve')+'|'+x.class_name+'|'+x.full_name.toLowerCase()]=pidOf(x)});
   const safeCls=cls.replace(/[^\w\-]+/g,'_');
   for(const f of files){
     const name=nameFrom(f);
@@ -503,10 +588,11 @@ $('#go').onclick=async()=>{
       if(all.length!==1){log(name+' : '+(all.length?all.length+' visages sur la photo (un seul attendu)':'aucun visage détecté'),'er');continue}
       const d=all[0];
       if(d.detection.box.width<110){log(name+' : visage trop petit, utilisez une photo plus rapprochée','er');continue}
+      const pk=kind+'|'+cls+'|'+name.toLowerCase(),pid=pm[pk]||(pm[pk]=crypto.randomUUID());
       const path=`${kind}/${safeCls}/${name.replace(/[^\w\-]+/g,'_')}_${Date.now()}.jpg`;
       const up=await sb.storage.from(BUCKET).upload(path,await shrink(img),{contentType:'image/jpeg'});
       if(up.error)throw up.error;
-      const ins=await sb.from('students').insert({full_name:name,class_name:cls,kind,photo_path:path,descriptor:Array.from(d.descriptor)});
+      const ins=await sb.from('students').insert({person_id:pid,full_name:name,class_name:cls,kind,photo_path:path,descriptor:Array.from(d.descriptor)});
       if(ins.error)throw ins.error;
       n++;log(name+' : importé','ok');
     }catch(e){log(name+' : '+(e.message||e),'er')}
