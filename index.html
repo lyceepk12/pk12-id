@@ -42,7 +42,7 @@ input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);ba
 
 #top{display:none}
 .out{background:none;border:1px solid var(--line);color:var(--mut);border-radius:8px;padding:4px 10px;font:inherit;font-size:13px;margin-left:8px}
-#auth{min-height:100vh;display:none;flex-direction:column;justify-content:center;padding-bottom:40px}
+#auth{min-height:100vh;display:none;flex-direction:column;padding:24px 16px 40px}
 #auth .logo,.lk .logo{width:150px;height:150px;margin:0 auto 14px;display:block;border-radius:50%;background:#fff;box-shadow:0 10px 30px #0008}
 #auth h1{text-align:center;font-size:34px}
 #auth .sub{text-align:center;color:var(--mut);margin:4px 0 22px}
@@ -55,6 +55,7 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
 #lock{display:none;position:fixed;inset:0;z-index:50;background:var(--bg);align-items:center;justify-content:center;padding:24px}
 .lk{width:100%;max-width:420px;text-align:center}.lk h2{margin:6px 0}
 #lerr{color:var(--bad);min-height:20px}
+#auth>:first-child{margin-top:auto!important}#auth>:last-child{margin-bottom:auto}
 </style>
 </head>
 <body>
@@ -70,10 +71,6 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
   <div class="pwrow"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye">Voir</button></div>
   <button class="btn" id="login">Se connecter</button>
   <p id="aerr"></p>
-  <details id="cfg"><summary>Configuration Supabase</summary>
-    <label for="url">URL du projet</label><input id="url" placeholder="https://xxxx.supabase.co">
-    <label for="key">Clé anon (publique)</label><input id="key">
-  </details>
 </main>
 
 <!-- App -->
@@ -112,15 +109,16 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
 const $=s=>document.querySelector(s);
 const MODELS='https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model';
 const THRESHOLD=0.5, BUCKET='photos';
+// --- Configuration Supabase (la clé "anon" est publique par conception) ---
+const SUPABASE_URL='https://ovdzznzyleainlidwjrd.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92ZHp6bnp5bGVhaW5saWR3anJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2Mzg2NTIsImV4cCI6MjEwNzIxNDY1Mn0.FbeM8Gm9_IldvMCp4fMBWBvrydieXe0GW2P7Nd7tUNg';
 const LOCK_MIN=5, LOCK_MS=LOCK_MIN*60000; // durée d'inactivité avant verrouillage
 let sb,matcher,students=[],facing='user',stream,started=false,locked=false,role='scanner';
 
 // ---------- Démarrage ----------
 (async()=>{
   if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
-  const u=localStorage.pk_url,k=localStorage.pk_key;
-  if(!u||!k){showAuth();return}
-  sb=supabase.createClient(u,k);
+  sb=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
   const {data}=await sb.auth.getSession();
   if(!data.session)showAuth();
   else if(Date.now()-(+localStorage.pk_last||0)>LOCK_MS)lock();
@@ -128,23 +126,20 @@ let sb,matcher,students=[],facing='user',stream,started=false,locked=false,role=
 })();
 function showAuth(){
   $('#auth').style.display='flex';$('#top').style.display='none';
-  $('#url').value=localStorage.pk_url||'';$('#key').value=localStorage.pk_key||'';
   $('#mail').value=localStorage.pk_mail||'';
-  if(!localStorage.pk_url||!localStorage.pk_key)$('#cfg').open=true;
 }
 $('#eye').onclick=()=>{const p=$('#pw'),h=p.type==='password';p.type=h?'text':'password';$('#eye').textContent=h?'Masquer':'Voir'};
 $('#pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('#login').click()});
 $('#login').onclick=async()=>{
-  const u=$('#url').value.trim(),k=$('#key').value.trim(),err=$('#aerr'),btn=$('#login');
+  const err=$('#aerr'),btn=$('#login');
   err.textContent='';
-  if(!u||!k){$('#cfg').open=true;err.textContent='Renseignez l\'URL et la clé Supabase.';return}
+  if(SUPABASE_KEY.startsWith('COLLEZ')){err.textContent='Clé Supabase non renseignée dans index.html.';return}
   if(!$('#mail').value||!$('#pw').value){err.textContent='Entrez votre email et votre mot de passe.';return}
   btn.disabled=true;btn.textContent='Connexion…';
   try{
-    sb=supabase.createClient(u,k);
     const {error}=await sb.auth.signInWithPassword({email:$('#mail').value.trim(),password:$('#pw').value});
     if(error)throw error;
-    localStorage.pk_url=u;localStorage.pk_key=k;localStorage.pk_mail=$('#mail').value.trim();
+    localStorage.pk_mail=$('#mail').value.trim();
     $('#pw').value='';$('#auth').style.display='none';touch();startApp();
   }catch(e){
     err.textContent=/invalid login/i.test(e.message)?'Email ou mot de passe incorrect.':'Connexion impossible : '+(e.message||e);
