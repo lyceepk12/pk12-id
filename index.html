@@ -59,7 +59,7 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
 </style>
 </head>
 <body>
-<header id="top"><h1><img class="hl" src="logo.png" alt=""><b>PK12</b>ID</h1><span><span class="tag" id="role"></span><span class="small" id="stat">Chargement…</span><button class="out" id="logout">Quitter</button></span></header>
+<header id="top"><h1><img class="hl" src="logo.png" alt=""><b>PK12</b>ID</h1><span><span class="tag" id="role"></span><span class="small" id="stat">Chargement…</span><button class="out" id="share" style="display:none">Partager</button><button class="out" id="logout">Quitter</button></span></header>
 
 <!-- Connexion -->
 <main id="auth">
@@ -71,6 +71,7 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
   <div class="pwrow"><input id="pw" type="password" autocomplete="current-password"><button type="button" id="eye">Voir</button></div>
   <button class="btn" id="login">Se connecter</button>
   <p id="aerr"></p>
+  <div id="inst" style="display:none"><button class="btn alt" id="instbtn">Installer l'application</button><p class="small" id="insthelp" style="text-align:center"></p></div>
 </main>
 
 <!-- App -->
@@ -172,6 +173,28 @@ async function loadStudents(){
   $('#stat').textContent=students.length+' élèves';
 }
 
+// ---------- Installation et partage ----------
+let dip;
+const standalone=matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+function showInst(){
+  if(standalone)return;
+  $('#inst').style.display='block';
+  if(ios&&!dip){$('#instbtn').style.display='none';
+    $('#insthelp').textContent="Sur iPhone (Safari) : touchez le bouton Partager, puis « Sur l'écran d'accueil ».";}
+}
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();dip=e;showInst()});
+addEventListener('appinstalled',()=>{$('#inst').style.display='none'});
+if(ios)showInst();
+$('#instbtn').onclick=async()=>{if(!dip)return;dip.prompt();await dip.userChoice;dip=null;$('#inst').style.display='none'};
+$('#share').onclick=async()=>{
+  const url=new URL('./',location.href).href;
+  try{
+    if(navigator.share)await navigator.share({title:'PK12 ID',text:'Installez PK12 ID sur votre téléphone :',url});
+    else{await navigator.clipboard.writeText(url);alert('Lien copié :\n'+url)}
+  }catch(e){}
+};
+
 // ---------- Rôle ----------
 async function loadRole(){
   try{
@@ -179,6 +202,7 @@ async function loadRole(){
     const r=await sb.from('profiles').select('role').eq('user_id',user.id).maybeSingle();
     role=r.data&&r.data.role==='admin'?'admin':'scanner';
   }catch(e){role='scanner'}
+  $('#share').style.display=role==='admin'?'':'none';
   $('#role').textContent=role==='admin'?'Admin':'Scanner';
   document.querySelector('nav').style.display=role==='admin'?'flex':'none';
 }
