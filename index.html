@@ -56,6 +56,14 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
 .lk{width:100%;max-width:420px;text-align:center}.lk h2{margin:6px 0}
 #lerr{color:var(--bad);min-height:20px}
 #auth>:first-child{margin-top:auto!important}#auth>:last-child{margin-bottom:auto}
+select{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--tx);font:inherit}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;padding:10px 0 4px}
+.pc{margin:0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;text-align:center}
+.pc img{width:100%;aspect-ratio:4/5;object-fit:cover;border-radius:8px;background:#0006;display:block}
+.pc figcaption{font-size:14px;margin:6px 0;word-break:break-word}
+.del{width:100%;border:1px solid var(--bad);background:none;color:var(--bad);border-radius:8px;padding:6px;font:inherit;font-size:13px}
+#dlist details{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:10px;color:var(--tx);font-size:16px}
+#dlist summary{font-weight:600}
 </style>
 </head>
 <body>
@@ -76,7 +84,7 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
 
 <!-- App -->
 <div id="app" style="display:none">
-<nav><button data-t="scan" class="on">Scanner</button><button data-t="imp">Importer</button></nav>
+<nav><button data-t="scan" class="on">Scanner</button><button data-t="imp">Importer</button><button data-t="dir">Annuaire</button></nav>
 <main>
   <section id="scan" class="on">
     <div class="cam"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
@@ -86,11 +94,20 @@ details{margin-top:16px;color:var(--mut);font-size:14px}summary{cursor:pointer}
   </section>
 
   <section id="imp">
-    <p class="msg">Nommez chaque photo avec le nom de l'élève, ex. <b>Dupont_Marie.jpg</b>. Une classe à la fois.</p>
-    <label>Classe</label><input id="cls" placeholder="ex. 2nde A">
+    <p class="msg">Nommez chaque photo avec le nom de la personne, ex. <b>Dupont_Marie.jpg</b>. Importez un groupe à la fois (une classe, une discipline ou une fonction).</p>
+    <label for="kind">Type de personne</label>
+    <select id="kind"><option value="eleve">Élève</option><option value="enseignant">Enseignant</option><option value="personnel">Personnel administratif</option></select>
+    <label id="clsl" for="cls">Classe</label><input id="cls" placeholder="ex. 2nde A">
     <label>Photos des élèves</label><input id="files" type="file" accept="image/*" multiple>
-    <button class="btn" id="go">Importer la classe</button>
+    <button class="btn" id="go">Importer</button>
     <div id="log"></div>
+  </section>
+
+  <section id="dir">
+    <label for="dkind">Afficher</label>
+    <select id="dkind"><option value="all">Tout le monde</option><option value="eleve">Élèves (par classe)</option><option value="enseignant">Enseignants (par discipline)</option><option value="personnel">Personnel (par fonction)</option></select>
+    <input id="dsearch" placeholder="Rechercher un nom…" style="margin-top:10px">
+    <div id="dlist"></div>
   </section>
 </main>
 </div>
@@ -114,6 +131,11 @@ const THRESHOLD=0.5, BUCKET='photos';
 const SUPABASE_URL='https://ovdzznzyleainlidwjrd.supabase.co';
 const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92ZHp6bnp5bGVhaW5saWR3anJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2Mzg2NTIsImV4cCI6MjEwNzIxNDY1Mn0.FbeM8Gm9_IldvMCp4fMBWBvrydieXe0GW2P7Nd7tUNg';
 const LOCK_MIN=5, LOCK_MS=LOCK_MIN*60000; // durée d'inactivité avant verrouillage
+const KINDS={
+  eleve:{title:'Élève',lbl:'Classe',ph:'ex. 2nde A'},
+  enseignant:{title:'Enseignant',lbl:'Discipline',ph:'ex. Mathématiques'},
+  personnel:{title:'Personnel administratif',lbl:'Fonction',ph:'ex. Surveillant, Proviseur'}
+};
 let sb,matcher,students=[],facing='user',stream,started=false,locked=false,role='scanner';
 
 // ---------- Démarrage ----------
@@ -166,11 +188,14 @@ async function startApp(){
 async function loadStudents(){
   students=[];
   for(let from=0;;from+=1000){
-    const {data,error}=await sb.from('students').select('id,full_name,class_name,photo_path,descriptor').range(from,from+999);
+    const {data,error}=await sb.from('students').select('id,full_name,class_name,kind,photo_path,descriptor').range(from,from+999);
     if(error||!data.length)break;students.push(...data);if(data.length<1000)break;
   }
+  rebuild();
+}
+function rebuild(){
   matcher=students.length?new faceapi.FaceMatcher(students.map(s=>new faceapi.LabeledFaceDescriptors(s.id,[new Float32Array(s.descriptor)])),THRESHOLD):null;
-  $('#stat').textContent=students.length+' élèves';
+  $('#stat').textContent=students.length+' inscrits';
 }
 
 // ---------- Installation et partage ----------
@@ -203,7 +228,7 @@ async function loadRole(){
     role=r.data&&r.data.role==='admin'?'admin':'scanner';
   }catch(e){role='scanner'}
   $('#share').style.display=role==='admin'?'':'none';
-  $('#role').textContent=role==='admin'?'Admin':'Scanner';
+  $('#role').textContent=(role==='admin'?'Admin':'Scanner')+' v9';
   document.querySelector('nav').style.display=role==='admin'?'flex':'none';
 }
 
@@ -237,6 +262,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button,section').forEach(e=>e.classList.remove('on'));
   b.classList.add('on');$('#'+b.dataset.t).classList.add('on');
   b.dataset.t==='scan'?startCam():stopCam();
+  if(b.dataset.t==='dir')renderDir();
 });
 
 // ---------- Caméra ----------
@@ -266,20 +292,62 @@ $('#snap').onclick=async()=>{
     if(!ok){res.insertAdjacentHTML('beforeend','<div class="id no"><div><h2>Non reconnu</h2><p>Aucune correspondance dans la base.</p></div></div>');continue}
     const s=students.find(x=>x.id===m.label),pct=Math.round((1-m.distance)*100);
     const {data}=await sb.storage.from(BUCKET).createSignedUrl(s.photo_path,300);
-    res.insertAdjacentHTML('beforeend',`<div class="id"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>Classe : ${esc(s.class_name)}</p><span class="c">${pct}%</span></div></div>`);
+    res.insertAdjacentHTML('beforeend',`<div class="id"><img src="${data?.signedUrl||''}" alt=""><div><h2>${esc(s.full_name)}</h2><p>${KINDS[s.kind||'eleve'].title} - ${KINDS[s.kind||'eleve'].lbl} : ${esc(s.class_name)}</p><span class="c">${pct}%</span></div></div>`);
   }
   setTimeout(()=>g.clearRect(0,0,ov.width,ov.height),2500);
   }catch(e){res.innerHTML='<p class="msg">Erreur : '+esc(e.message||String(e))+'</p>'}
 };
 const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-// ---------- Import par classe ----------
+// ---------- Type de personne (import) ----------
+$('#kind').onchange=()=>{const k=KINDS[$('#kind').value];$('#clsl').textContent=k.lbl;$('#cls').placeholder=k.ph};
+
+// ---------- Annuaire (admin) ----------
+let dgroups={};
+function renderDir(){
+  const q=$('#dsearch').value.trim().toLowerCase(),k=$('#dkind').value;
+  const open=new Set([...document.querySelectorAll('#dlist details[open]')].map(d=>d.dataset.key));
+  dgroups={};
+  students.filter(s=>(k==='all'||(s.kind||'eleve')===k)&&(!q||s.full_name.toLowerCase().includes(q)))
+    .forEach(s=>{const key=(s.kind||'eleve')+'|'+s.class_name;(dgroups[key]=dgroups[key]||[]).push(s)});
+  const keys=Object.keys(dgroups).sort((a,b)=>a.localeCompare(b,'fr',{numeric:true}));
+  $('#dlist').innerHTML=keys.length?keys.map(key=>{
+    const kd=key.split('|')[0],g=key.slice(kd.length+1);
+    return `<details data-key="${esc(key)}"><summary>${KINDS[kd].lbl} : ${esc(g)} (${dgroups[key].length})</summary><div class="grid"></div></details>`;
+  }).join(''):'<p class="msg">Aucune personne trouvée.</p>';
+  document.querySelectorAll('#dlist details').forEach(d=>{if(q||open.has(d.dataset.key))d.open=true});
+}
+async function fillGroup(d){
+  const grid=d.querySelector('.grid');
+  if(grid.dataset.done)return;grid.dataset.done=1;
+  const arr=(dgroups[d.dataset.key]||[]).slice().sort((a,b)=>a.full_name.localeCompare(b.full_name,'fr'));
+  const {data}=await sb.storage.from(BUCKET).createSignedUrls(arr.map(s=>s.photo_path),3600);
+  const url={};(data||[]).forEach(x=>{url[x.path]=x.signedUrl});
+  grid.innerHTML=arr.map(s=>`<figure class="pc"><img loading="lazy" src="${url[s.photo_path]||''}" alt=""><figcaption>${esc(s.full_name)}</figcaption><button class="del" data-id="${s.id}">Supprimer</button></figure>`).join('');
+}
+$('#dlist').addEventListener('toggle',e=>{if(e.target.open)fillGroup(e.target)},true);
+$('#dkind').onchange=renderDir;$('#dsearch').oninput=renderDir;
+$('#dlist').addEventListener('click',async e=>{
+  const b=e.target.closest('.del');if(!b||role!=='admin')return;
+  const s=students.find(x=>x.id===b.dataset.id);if(!s)return;
+  if(!confirm('Supprimer '+s.full_name+' ('+s.class_name+') ?\nLa photo et la reconnaissance seront effacées définitivement.'))return;
+  b.disabled=true;b.textContent='Suppression…';
+  const r=await sb.from('students').delete().eq('id',s.id).select('id');
+  if(r.error||!r.data||!r.data.length){
+    alert('Suppression refusée : '+(r.error?r.error.message:'droits insuffisants (compte admin requis).'));
+    b.disabled=false;b.textContent='Supprimer';return;
+  }
+  await sb.storage.from(BUCKET).remove([s.photo_path]);
+  students=students.filter(x=>x.id!==s.id);rebuild();renderDir();
+});
+
+// ---------- Import par groupe ----------
 const log=(t,c)=>{const d=document.createElement('div');d.textContent=t;d.className=c||'';$('#log').prepend(d)};
 const nameFrom=f=>f.name.replace(/\.[^.]+$/,'').replace(/[_\-]+/g,' ').replace(/\s+/g,' ').trim();
 $('#go').onclick=async()=>{
   if(role!=='admin')return;
-  const cls=$('#cls').value.trim(),files=[...$('#files').files];
-  if(!cls||!files.length){log('Indiquez la classe et choisissez des photos.','er');return}
+  const kind=$('#kind').value,cls=$('#cls').value.trim(),files=[...$('#files').files];
+  if(!cls||!files.length){log('Renseignez le champ « '+KINDS[kind].lbl+' » et choisissez des photos.','er');return}
   $('#go').disabled=true;$('#log').innerHTML='';let n=0;
   const safeCls=cls.replace(/[^\w\-]+/g,'_');
   for(const f of files){
@@ -288,15 +356,15 @@ $('#go').onclick=async()=>{
       const img=await faceapi.bufferToImage(f);
       const d=await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
       if(!d){log(name+' : aucun visage détecté','er');continue}
-      const path=`${safeCls}/${name.replace(/[^\w\-]+/g,'_')}_${Date.now()}.jpg`;
+      const path=`${kind}/${safeCls}/${name.replace(/[^\w\-]+/g,'_')}_${Date.now()}.jpg`;
       const up=await sb.storage.from(BUCKET).upload(path,f,{contentType:f.type||'image/jpeg'});
       if(up.error)throw up.error;
-      const ins=await sb.from('students').insert({full_name:name,class_name:cls,photo_path:path,descriptor:Array.from(d.descriptor)});
+      const ins=await sb.from('students').insert({full_name:name,class_name:cls,kind,photo_path:path,descriptor:Array.from(d.descriptor)});
       if(ins.error)throw ins.error;
       n++;log(name+' : importé','ok');
     }catch(e){log(name+' : '+(e.message||e),'er')}
   }
-  log(`Terminé : ${n}/${files.length} élèves importés.`,'ok');
+  log(`Terminé : ${n}/${files.length} personnes importées.`,'ok');
   $('#go').disabled=false;await loadStudents();
 };
 </script>
